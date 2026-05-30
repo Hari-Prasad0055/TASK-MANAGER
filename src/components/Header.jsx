@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { formatDateStr } from '../utils/productivity';
 
-export default function Header({ selectedDate, setSelectedDate, searchQuery, setSearchQuery, score }) {
+export default function Header({ selectedDate, setSelectedDate, searchQuery, setSearchQuery, score, user, onLogout }) {
   const dateInputRef = useRef(null);
 
   // Parse selected date and handle adjustments
@@ -103,11 +103,25 @@ export default function Header({ selectedDate, setSelectedDate, searchQuery, set
             <Sparkles size={11} className="level-icon" />
             <span>{getProducerTag()}</span>
           </div>
-          <span className="profile-name">U Hari Prasad</span>
+          <span className="profile-name">{user ? user.username : 'Guest User'}</span>
         </div>
-        <div className="profile-avatar">
-          UH
-          <span className="online-dot"></span>
+        
+        <div className="profile-dropdown-container" tabIndex="0">
+          <div className="profile-avatar" style={{ cursor: 'pointer' }}>
+            {user ? user.username.substring(0, 2).toUpperCase() : 'GS'}
+            <span className="online-dot" style={{ backgroundColor: user ? 'var(--accent-success)' : '#94a3b8' }}></span>
+          </div>
+          
+          <div className="profile-dropdown animate-slide-up">
+            <div className="dropdown-user-info">
+              <span className="dropdown-username">{user ? user.username : 'Guest Mode'}</span>
+              <span className="dropdown-status">{user ? 'Cloud Synced' : 'Local Storage'}</span>
+            </div>
+            <div className="dropdown-divider"></div>
+            <button onClick={onLogout} className="dropdown-logout-btn">
+              {user ? 'Log Out' : 'Exit Guest Mode'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -317,6 +331,95 @@ export default function Header({ selectedDate, setSelectedDate, searchQuery, set
           background-color: var(--accent-success);
           border: 2px solid white;
           border-radius: 50%;
+        }
+
+        .profile-dropdown-container {
+          position: relative;
+        }
+
+        .profile-dropdown {
+          position: absolute;
+          right: 0;
+          top: calc(100% + 8px);
+          background-color: var(--bg-secondary);
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-md);
+          box-shadow: var(--shadow-lg);
+          padding: 0.75rem;
+          min-width: 160px;
+          display: none;
+          flex-direction: column;
+          z-index: 100;
+        }
+
+        .profile-dropdown::before {
+          content: '';
+          position: absolute;
+          top: -12px;
+          left: 0;
+          width: 100%;
+          height: 12px;
+          background: transparent;
+        }
+
+        .profile-dropdown-container:hover .profile-dropdown,
+        .profile-dropdown-container:focus-within .profile-dropdown {
+          display: flex;
+        }
+
+        .dropdown-user-info {
+          display: flex;
+          flex-direction: column;
+          padding: 0.25rem 0.5rem;
+          text-align: left;
+        }
+
+        .dropdown-username {
+          font-family: var(--font-sans);
+          font-size: 0.85rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+
+        .dropdown-status {
+          font-size: 0.65rem;
+          color: var(--text-muted);
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+
+        .dropdown-divider {
+          height: 1px;
+          background-color: var(--border-color);
+          margin: 0.5rem 0;
+        }
+
+        .dropdown-logout-btn {
+          font-family: var(--font-sans);
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: #e11d48;
+          background-color: transparent;
+          border: 1px solid transparent;
+          padding: 0.375rem 0.5rem;
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          text-align: left;
+          transition: var(--transition-smooth);
+        }
+
+        .dropdown-logout-btn:hover {
+          background-color: #fff1f2;
+          border-color: rgba(225, 29, 72, 0.1);
+        }
+
+        .animate-slide-up {
+          animation: dropdown-slide 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes dropdown-slide {
+          from { transform: translateY(8px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
       `}</style>
     </header>

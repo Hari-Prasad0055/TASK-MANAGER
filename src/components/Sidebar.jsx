@@ -9,7 +9,7 @@ import {
   Store
 } from 'lucide-react';
 
-export default function Sidebar({ currentTab, setCurrentTab }) {
+export default function Sidebar({ currentTab, setCurrentTab, user, onLogout }) {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, desc: 'Overall stats & summary' },
     { id: 'today', label: 'Today Planner', icon: CalendarRange, desc: 'Task scheduler timeline' },
@@ -58,9 +58,32 @@ export default function Sidebar({ currentTab, setCurrentTab }) {
 
         <div className="sidebar-footer">
           <div className="user-pro-badge">
-            <span className="pro-pill">PRODUCER LEVEL 4</span>
-            <div className="pro-progress-bar">
-              <div className="pro-progress-fill" style={{ width: '72%' }}></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+              <span className="pro-pill" style={{ margin: 0 }}>
+                {user ? user.username.toUpperCase() : 'GUEST'}
+              </span>
+              <button 
+                onClick={onLogout} 
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: 'var(--text-muted)', 
+                  cursor: 'pointer',
+                  fontSize: '0.7rem',
+                  fontWeight: '600',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  transition: 'var(--transition-smooth)'
+                }}
+                onMouseEnter={(e) => { e.target.style.color = '#e11d48'; e.target.style.backgroundColor = '#fff1f2'; }}
+                onMouseLeave={(e) => { e.target.style.color = 'var(--text-muted)'; e.target.style.backgroundColor = 'transparent'; }}
+                title="Log Out"
+              >
+                Log Out
+              </button>
+            </div>
+            <div className="pro-progress-bar" style={{ marginTop: '0.5rem' }}>
+              <div className="pro-progress-fill" style={{ width: user ? '85%' : '40%' }}></div>
             </div>
           </div>
         </div>

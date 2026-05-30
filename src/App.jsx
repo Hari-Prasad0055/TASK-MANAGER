@@ -7,6 +7,8 @@ import ProductivityCharts from './components/ProductivityCharts';
 import CategoryManager from './components/CategoryManager';
 import Settings from './components/Settings';
 import TaskForm from './components/TaskForm';
+import Auth from './components/Auth';
+import { api } from './utils/api';
 import { 
   calculateDailyScore, 
   calculatePlannedHours, 
@@ -25,39 +27,16 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  
-  // 1. Initial State Hydration from Local Storage
-  const [tasks, setTasks] = useState(() => {
-    const local = localStorage.getItem('prodmarket_tasks');
-    if (local) {
-      try {
-        return JSON.parse(local);
-      } catch (e) {
-        console.error('Failed to parse cached tasks, reloading mock database.', e);
-      }
-    }
-    // If empty, generate and seed mock data
-    const mock = generateMockTasks();
-    localStorage.setItem('prodmarket_tasks', JSON.stringify(mock));
-    return mock;
-  });
+  // --- Auth & Session State ---
+  const [token, setToken] = useState(() => localStorage.getItem('prodmarket_token') || null);
+  const [user, setUser] = useState(null);
+  const [isGuest, setIsGuest] = useState(() => localStorage.getItem('prodmarket_guest') === 'true');
+  const [authLoading, setAuthLoading] = useState(true);
 
-  const [categories, setCategories] = useState(() => {
-    const local = localStorage.getItem('prodmarket_categories');
-    if (local) {
-      try {
-        return JSON.parse(local);
-      } catch (e) {}
-    }
-    return DEFAULT_CATEGORIES;
-  });
-
-  const [targetHours, setTargetHours] = useState(() => {
-    const local = localStorage.getItem('prodmarket_target_hours');
-    return local ? parseFloat(local) : 6.0; // default 6 hours
-  });
-
-  // Selected date defaults to current calendar day formatted as YYYY-MM-DD
+  // --- Core Application States ---
+  const [tasks, setTasks] = useState({});
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [targetHours, setTargetHours] = useState(6.0);
   const [selectedDate, setSelectedDate] = useState(() => formatDateStr(new Date()));
   const [searchQuery, setSearchQuery] = useState('');
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -66,23 +45,164 @@ export default function App() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
 
-  // Sync to local storage on changes
+  // --- Session Verification and Initial Loading ---
   useEffect(() => {
-    localStorage.setItem('prodmarket_tasks', JSON.stringify(tasks));
-  }, [tasks]);
+    const initAuthAndLoad = async () => {
+      setAuthLoading(true);
+      if (token) {
+        try {
+          const profile = await api.getUserProfile(token);
+          setUser(profile);
+          setTargetHours(profile.targetHours);
+          setCategories(profile.categories);
+          
+          // Fetch backend tasks
+          const backendTasks = await api.fetchTasks(token);
+          const dict = {};
+          backendTasks.forEach(task => {
+            if (!dict[task.date]) {
+              dict[task.date] = [];
+            }
+            dict[task.date].push(task);
+          });
+          setTasks(dict);
+        } catch (e) {
+          console.error('Failed to restore user session:', e);
+          setToken(null);
+          localStorage.removeItem('prodmarket_token');
+        }
+      } else {
+        // Fallback to localStorage if guest or offline
+        const cachedTasks = localStorage.getItem('prodmarket_tasks');
+        if (cachedTasks) {
+          try {
+            setTasks(JSON.parse(cachedTasks));
+          } catch (e) {
+            setTasks(generateMockTasks());
+          }
+        } else {
+          const mock = generateMockTasks();
+          localStorage.setItem('prodmarket_tasks', JSON.stringify(mock));
+          setTasks(mock);
+        }
+
+        const cachedCats = localStorage.getItem('prodmarket_categories');
+        if (cachedCats) {
+          try {
+            setCategories(JSON.parse(cachedCats));
+          } catch (e) {}
+        }
+
+        const cachedHours = localStorage.getItem('prodmarket_target_hours');
+        if (cachedHours) {
+          setTargetHours(parseFloat(cachedHours));
+        }
+      }
+      setAuthLoading(false);
+    };
+
+    initAuthAndLoad();
+  }, [token]);
+
+  // Sync to local storage only if guest/offline
+  useEffect(() => {
+    if (!token) {
+      localStorage.setItem('prodmarket_tasks', JSON.stringify(tasks));
+    }
+  }, [tasks, token]);
 
   useEffect(() => {
-    localStorage.setItem('prodmarket_categories', JSON.stringify(categories));
-  }, [categories]);
+    if (!token) {
+      localStorage.setItem('prodmarket_categories', JSON.stringify(categories));
+    }
+  }, [categories, token]);
 
   useEffect(() => {
-    localStorage.setItem('prodmarket_target_hours', targetHours.toString());
-  }, [targetHours]);
+    if (!token) {
+      localStorage.setItem('prodmarket_target_hours', targetHours.toString());
+    }
+  }, [targetHours, token]);
 
-  // Derived tasks lists
+  // --- Auth Handlers ---
+  const handleAuthSuccess = async (newToken, userData) => {
+    localStorage.setItem('prodmarket_token', newToken);
+    localStorage.removeItem('prodmarket_guest');
+    setIsGuest(false);
+    setToken(newToken);
+    setUser(userData);
+    setTargetHours(userData.targetHours);
+    setCategories(userData.categories);
+
+    // Dynamic Merger: sync offline/guest tasks with backend MONGODB database
+    const local = localStorage.getItem('prodmarket_tasks');
+    if (local) {
+      try {
+        const localTasks = JSON.parse(local);
+        const flatLocal = Object.values(localTasks).flat();
+        if (flatLocal.length > 0) {
+          if (window.confirm(`We detected ${flatLocal.length} offline tasks. Sync them with your cloud database?`)) {
+            await api.syncTasks(newToken, flatLocal);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to merge local tasks:', e);
+      }
+    }
+
+    // Refresh tasks list
+    try {
+      const backendTasks = await api.fetchTasks(newToken);
+      const dict = {};
+      backendTasks.forEach(task => {
+        if (!dict[task.date]) {
+          dict[task.date] = [];
+        }
+        dict[task.date].push(task);
+      });
+      setTasks(dict);
+    } catch (e) {
+      console.error('Failed to load tasks after login:', e);
+    }
+  };
+
+  const handleGuestLogin = () => {
+    localStorage.setItem('prodmarket_guest', 'true');
+    setIsGuest(true);
+  };
+
+  const handleLogout = () => {
+    if (window.confirm('Are you sure you want to log out?')) {
+      localStorage.removeItem('prodmarket_token');
+      localStorage.removeItem('prodmarket_guest');
+      setToken(null);
+      setUser(null);
+      setIsGuest(false);
+      // Re-hydrate local storage
+      const local = localStorage.getItem('prodmarket_tasks');
+      if (local) {
+        try {
+          setTasks(JSON.parse(local));
+        } catch (e) {}
+      } else {
+        setTasks(generateMockTasks());
+      }
+    }
+  };
+
+  // --- Data Sync Handlers ---
+  const handleUpdateTargetHours = async (newHours) => {
+    setTargetHours(newHours);
+    if (token) {
+      try {
+        await api.updateSettings(token, { targetHours: newHours });
+      } catch (e) {
+        console.error('Failed to update target hours on backend:', e);
+      }
+    }
+  };
+
   const todaysTasks = tasks[selectedDate] || [];
 
-  // Filter tasks based on search bar queries (filters title or category matching)
   const getFilteredTasks = (taskList) => {
     if (!searchQuery.trim()) return taskList;
     const query = searchQuery.toLowerCase().trim();
@@ -92,27 +212,39 @@ export default function App() {
   };
 
   const activeFilteredTasks = getFilteredTasks(todaysTasks);
-
-  // Today's Score & Duration metrics
   const score = calculateDailyScore(activeFilteredTasks);
   const plannedHours = calculatePlannedHours(activeFilteredTasks);
   const focusedHours = calculateFocusedHours(activeFilteredTasks);
 
-  // Handlers for interactive checklist controls
-  const handleToggleStatus = (taskId, newStatus) => {
+  // --- CRUD Handlers ---
+  const handleToggleStatus = async (taskId, newStatus) => {
+    let updatedTask = null;
+
     setTasks((prev) => {
       const dayTasks = prev[selectedDate] || [];
-      const updated = dayTasks.map((t) => 
-        t.id === taskId ? { ...t, status: newStatus } : t
-      );
+      const updated = dayTasks.map((t) => {
+        if (t.id === taskId) {
+          updatedTask = { ...t, status: newStatus };
+          return updatedTask;
+        }
+        return t;
+      });
       return {
         ...prev,
         [selectedDate]: updated
       };
     });
+
+    if (token && updatedTask) {
+      try {
+        await api.saveTask(token, updatedTask);
+      } catch (e) {
+        console.error('Failed to sync status change to backend:', e);
+      }
+    }
   };
 
-  const handleDeleteTask = (taskId) => {
+  const handleDeleteTask = async (taskId) => {
     if (window.confirm('Delete this task block from today\'s schedule?')) {
       setTasks((prev) => {
         const dayTasks = prev[selectedDate] || [];
@@ -122,6 +254,14 @@ export default function App() {
           [selectedDate]: updated
         };
       });
+
+      if (token) {
+        try {
+          await api.deleteTask(token, taskId);
+        } catch (e) {
+          console.error('Failed to delete task from backend:', e);
+        }
+      }
     }
   };
 
@@ -145,32 +285,35 @@ export default function App() {
       notes: '',
       date: selectedDate
     });
-    // Setting editingTask to template format, but flag it as new task by nulling id
-    setEditingTask(prev => ({ ...prev, id: undefined }));
     setIsFormOpen(true);
   };
 
-  const handleSaveTask = (taskData) => {
+  const handleSaveTask = async (taskData) => {
+    const dateKey = taskData.date || selectedDate;
+    const dayTasks = tasks[dateKey] || [];
+    let finalTask;
+
+    const exists = dayTasks.some((t) => t.id === taskData.id);
+    if (exists) {
+      finalTask = taskData;
+    } else {
+      finalTask = {
+        ...taskData,
+        id: taskData.id || `task-${Date.now()}`,
+        date: dateKey
+      };
+    }
+
     setTasks((prev) => {
-      const dateKey = taskData.date || selectedDate;
       const dayTasks = prev[dateKey] || [];
       let updated;
-
-      // Check if task exists (editing) or is new
-      const exists = dayTasks.some((t) => t.id === taskData.id);
+      const exists = dayTasks.some((t) => t.id === finalTask.id);
       if (exists) {
-        updated = dayTasks.map((t) => (t.id === taskData.id ? taskData : t));
+        updated = dayTasks.map((t) => (t.id === finalTask.id ? finalTask : t));
       } else {
-        // Assign new ID if not present
-        const finalTask = {
-          ...taskData,
-          id: taskData.id || `task-${Date.now()}`,
-          date: dateKey
-        };
         updated = [...dayTasks, finalTask];
       }
 
-      // Re-sort chronologically
       updated.sort((a, b) => {
         const parseTime = (str) => str.split(':').map(Number)[0] + str.split(':').map(Number)[1]/60;
         return parseTime(a.startTime) - parseTime(b.startTime);
@@ -182,23 +325,47 @@ export default function App() {
       };
     });
 
+    if (token) {
+      try {
+        await api.saveTask(token, finalTask);
+      } catch (e) {
+        console.error('Failed to save task to backend:', e);
+      }
+    }
+
     setIsFormOpen(false);
     setEditingTask(null);
   };
 
-  // Category manipulations
-  const handleAddCategory = (newCat) => {
-    setCategories((prev) => [...prev, newCat]);
-  };
+  const handleAddCategory = async (newCat) => {
+    const updated = [...categories, newCat];
+    setCategories(updated);
 
-  const handleDeleteCategory = (catId) => {
-    if (window.confirm('Delete this custom category? (Existing tasks will remain unaltered)')) {
-      setCategories((prev) => prev.filter((c) => c.id !== catId));
+    if (token) {
+      try {
+        await api.updateSettings(token, { categories: updated });
+      } catch (e) {
+        console.error('Failed to save category to backend:', e);
+      }
     }
   };
 
-  // Clone today's planner tasks to tomorrow in advance
-  const handleCopyTasksToNextDay = () => {
+  const handleDeleteCategory = async (catId) => {
+    if (window.confirm('Delete this custom category? (Existing tasks will remain unaltered)')) {
+      const updated = categories.filter((c) => c.id !== catId);
+      setCategories(updated);
+
+      if (token) {
+        try {
+          await api.updateSettings(token, { categories: updated });
+        } catch (e) {
+          console.error('Failed to delete category from backend:', e);
+        }
+      }
+    }
+  };
+
+  const handleCopyTasksToNextDay = async () => {
     if (todaysTasks.length === 0) {
       alert('No tasks planned for the selected date to copy.');
       return;
@@ -207,70 +374,101 @@ export default function App() {
     const nextDate = new Date(selectedDate);
     nextDate.setDate(nextDate.getDate() + 1);
     const nextDateStr = formatDateStr(nextDate);
-
     const friendlyNextDate = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
     if (window.confirm(`Copy all ${todaysTasks.length} tasks from this day to tomorrow (${friendlyNextDate}) in advance?`)) {
-      setTasks((prev) => {
-        const nextDayExistingTasks = prev[nextDateStr] || [];
-        
-        // Clone and map: fresh unique IDs, reset status to 'pending', update date
-        const clonedTasks = todaysTasks.map((t, index) => ({
-          ...t,
-          id: `task-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 4)}`,
-          status: 'pending',
-          date: nextDateStr
-        }));
+      const nextDayExistingTasks = tasks[nextDateStr] || [];
+      
+      const clonedTasks = todaysTasks.map((t, index) => ({
+        ...t,
+        id: `task-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 4)}`,
+        status: 'pending',
+        date: nextDateStr
+      }));
 
-        // Merge cloned tasks avoiding exact name & start time duplicates
-        const mergedTasks = [...nextDayExistingTasks];
-        clonedTasks.forEach((cloned) => {
-          const duplicateExists = nextDayExistingTasks.some(
-            (existing) => 
-              existing.title.toLowerCase() === cloned.title.toLowerCase() && 
-              existing.startTime === cloned.startTime
-          );
-          if (!duplicateExists) {
-            mergedTasks.push(cloned);
-          }
-        });
-
-        // Sort chronologically
-        mergedTasks.sort((a, b) => {
-          const parseTime = (str) => str.split(':').map(Number)[0] + str.split(':').map(Number)[1]/60;
-          return parseTime(a.startTime) - parseTime(b.startTime);
-        });
-
-        return {
-          ...prev,
-          [nextDateStr]: mergedTasks
-        };
+      const mergedTasks = [...nextDayExistingTasks];
+      clonedTasks.forEach((cloned) => {
+        const duplicateExists = nextDayExistingTasks.some(
+          (existing) => 
+            existing.title.toLowerCase() === cloned.title.toLowerCase() && 
+            existing.startTime === cloned.startTime
+        );
+        if (!duplicateExists) {
+          mergedTasks.push(cloned);
+        }
       });
+
+      mergedTasks.sort((a, b) => {
+        const parseTime = (str) => str.split(':').map(Number)[0] + str.split(':').map(Number)[1]/60;
+        return parseTime(a.startTime) - parseTime(b.startTime);
+      });
+
+      setTasks((prev) => ({
+        ...prev,
+        [nextDateStr]: mergedTasks
+      }));
+
+      if (token) {
+        try {
+          const addedClonedTasks = clonedTasks.filter(
+            (cloned) => !nextDayExistingTasks.some(
+              (existing) => 
+                existing.title.toLowerCase() === cloned.title.toLowerCase() && 
+                existing.startTime === cloned.startTime
+            )
+          );
+          if (addedClonedTasks.length > 0) {
+            await api.syncTasks(token, addedClonedTasks);
+          }
+        } catch (e) {
+          console.error('Failed to sync copied tasks to backend:', e);
+        }
+      }
 
       alert(`Successfully copied ${todaysTasks.length} tasks to ${friendlyNextDate}!`);
     }
   };
 
-  // Settings & DB backup controls
-  const handleLoadMockData = () => {
+  const handleLoadMockData = async () => {
     const mock = generateMockTasks();
     setTasks(mock);
+
+    if (token) {
+      try {
+        const flatMock = Object.values(mock).flat();
+        await api.syncTasks(token, flatMock);
+      } catch (e) {
+        console.error('Failed to save mock data to backend:', e);
+      }
+    }
   };
 
-  const handleClearAllData = () => {
+  const handleClearAllData = async () => {
     setTasks({});
+
+    if (token) {
+      try {
+        await api.purgeAllTasks(token);
+      } catch (e) {
+        console.error('Failed to purge tasks on backend:', e);
+      }
+    }
   };
 
   const handleExportData = () => {
     return JSON.stringify(tasks, null, 2);
   };
 
-  const handleImportData = (jsonStr) => {
+  const handleImportData = async (jsonStr) => {
     try {
       const parsed = JSON.parse(jsonStr);
-      // Validate simple schema checks
       if (typeof parsed === 'object' && parsed !== null) {
         setTasks(parsed);
+
+        if (token) {
+          const flatTasks = Object.values(parsed).flat();
+          await api.syncTasks(token, flatTasks);
+        }
         return true;
       }
       return false;
@@ -280,7 +478,24 @@ export default function App() {
     }
   };
 
-  // Primary Workspace router mapping
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', width: '100vw', backgroundColor: 'var(--bg-primary)' }}>
+        <div className="auth-spinner" style={{ width: '40px', height: '40px', border: '3px solid var(--border-color)', borderTopColor: 'var(--brand-primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (!token && !isGuest) {
+    return (
+      <Auth 
+        onAuthSuccess={handleAuthSuccess} 
+        onGuestLogin={handleGuestLogin} 
+      />
+    );
+  }
+
   const renderTabContent = () => {
     switch (currentTab) {
       case 'dashboard':
@@ -372,7 +587,7 @@ export default function App() {
         return (
           <Settings 
             targetHours={targetHours}
-            setTargetHours={setTargetHours}
+            setTargetHours={handleUpdateTargetHours}
             onLoadMockData={handleLoadMockData}
             onClearAllData={handleClearAllData}
             onExportData={handleExportData}
@@ -390,6 +605,8 @@ export default function App() {
       <Sidebar 
         currentTab={currentTab} 
         setCurrentTab={setCurrentTab} 
+        user={user}
+        onLogout={handleLogout}
       />
 
       {/* 2. Right Workspace Content Pane */}
@@ -400,6 +617,8 @@ export default function App() {
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
           score={score}
+          user={user}
+          onLogout={handleLogout}
         />
 
         <div className="content-pane">

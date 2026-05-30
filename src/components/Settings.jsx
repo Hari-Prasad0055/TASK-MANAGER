@@ -120,10 +120,10 @@ export default function Settings({
         <div className="panel settings-panel-item">
           <h3 className="settings-section-title">
             <Database size={16} />
-            <span>Database & Storage Maintenance</span>
+            <span>Cloud Database Maintenance</span>
           </h3>
           <p className="settings-desc">
-            Control local databases. Inject realistic past-30-days mock metrics to test charting dashboards, or purge files to clean the cache.
+            Control persistent databases. Inject realistic past-30-days mock metrics to test charting dashboards, or purge tasks. Changes will synchronize with MongoDB.
           </p>
 
           <div className="action-buttons-stack">
@@ -161,10 +161,10 @@ export default function Settings({
         <div className="panel settings-panel-item backup-panel">
           <h3 className="settings-section-title">
             <Download size={16} />
-            <span>Data Portable Sync (Backup & Restore)</span>
+            <span>Data Sync (Backup, Restore & MongoDB Sync)</span>
           </h3>
           <p className="settings-desc">
-            Export all scheduled task indexes into a JSON format block. Paste or import backups to restore settings on other devices.
+            Export all scheduled task indexes into a JSON format block. Paste or import backups to restore settings and immediately synchronize them to MongoDB.
           </p>
 
           <div className="backup-row">
