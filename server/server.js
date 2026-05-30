@@ -28,11 +28,16 @@ const mongoURI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/taskmanag
 mongoose.connect(mongoURI)
   .then(() => {
     console.log('=== MongoDB Connected Successfully ===');
-    app.listen(PORT, () => {
-      console.log(`=== Server listening on port ${PORT} ===`);
-    });
   })
   .catch((error) => {
     console.error('!!! MongoDB connection error:', error);
-    process.exit(1);
   });
+
+// Only listen on port if not in serverless context (Vercel)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`=== Server listening on port ${PORT} ===`);
+  });
+}
+
+export default app;
