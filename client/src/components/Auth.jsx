@@ -38,7 +38,11 @@ export default function Auth({ onAuthSuccess, onGuestLogin }) {
 
     setLoading(true);
     try {
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+      const endpoint = isLogin 
+        ? `${cleanBase}/api/auth/login` 
+        : `${cleanBase}/api/auth/register`;
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
