@@ -127,29 +127,19 @@ export default function App() {
   const handleAuthSuccess = async (newToken, userData) => {
     localStorage.setItem('prodmarket_token', newToken);
     localStorage.removeItem('prodmarket_guest');
+    
+    // Completely wipe all offline guest/mock data from localStorage on login
+    localStorage.removeItem('prodmarket_tasks');
+    localStorage.removeItem('prodmarket_categories');
+    localStorage.removeItem('prodmarket_target_hours');
+
     setIsGuest(false);
     setToken(newToken);
     setUser(userData);
     setTargetHours(userData.targetHours);
     setCategories(userData.categories);
 
-    // Dynamic Merger: sync offline/guest tasks with backend MONGODB database
-    const local = localStorage.getItem('prodmarket_tasks');
-    if (local) {
-      try {
-        const localTasks = JSON.parse(local);
-        const flatLocal = Object.values(localTasks).flat();
-        if (flatLocal.length > 0) {
-          if (window.confirm(`We detected ${flatLocal.length} offline tasks. Sync them with your cloud database?`)) {
-            await api.syncTasks(newToken, flatLocal);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to merge local tasks:', e);
-      }
-    }
-
-    // Refresh tasks list
+    // Fetch fresh backend tasks directly from MongoDB
     try {
       const backendTasks = await api.fetchTasks(newToken);
       const dict = {};
@@ -162,6 +152,7 @@ export default function App() {
       setTasks(dict);
     } catch (e) {
       console.error('Failed to load tasks after login:', e);
+      setTasks({}); // Start fresh if loading fails, preventing leakage of other session data
     }
   };
 
@@ -174,18 +165,18 @@ export default function App() {
     if (window.confirm('Are you sure you want to log out?')) {
       localStorage.removeItem('prodmarket_token');
       localStorage.removeItem('prodmarket_guest');
+      
+      // Wipe all localStorage states to ensure a completely clean slate
+      localStorage.removeItem('prodmarket_tasks');
+      localStorage.removeItem('prodmarket_categories');
+      localStorage.removeItem('prodmarket_target_hours');
+
       setToken(null);
       setUser(null);
       setIsGuest(false);
-      // Re-hydrate local storage
-      const local = localStorage.getItem('prodmarket_tasks');
-      if (local) {
-        try {
-          setTasks(JSON.parse(local));
-        } catch (e) {}
-      } else {
-        setTasks(generateMockTasks());
-      }
+      setTasks({});
+      setCategories(DEFAULT_CATEGORIES);
+      setTargetHours(6.0);
     }
   };
 
